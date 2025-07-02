@@ -53,19 +53,21 @@ interface FlickKeyProps {
   keyData: { main: string; flicks: string[] };
   onCharacterInput: (char: string) => void;
   tiltScale: number;
+  forwardTilt: number; // 前後の傾きを追加
   position: 'left' | 'center' | 'right';
 }
 
-const FlickKey: React.FC<FlickKeyProps> = ({ keyData, onCharacterInput, tiltScale, position }) => {
+const FlickKey: React.FC<FlickKeyProps> = ({ keyData, onCharacterInput, tiltScale, forwardTilt, position }) => {
   const [isPressed, setIsPressed] = useState(false);
   const [currentFlick, setCurrentFlick] = useState(0);
   const [showFlicks, setShowFlicks] = useState(false);
   const panStartRef = useRef({ x: 0, y: 0 });
   const animationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Animated values for smooth scaling
+  // Animated values for smooth scaling and positioning
   const scale = useSharedValue(1);
   const fontSize = useSharedValue(18);
+  const translateY = useSharedValue(0);
 
   // Animation configuration
   const animationConfig = {
@@ -80,8 +82,10 @@ const FlickKey: React.FC<FlickKeyProps> = ({ keyData, onCharacterInput, tiltScal
 
   useEffect(() => {
     const threshold = 0.15; // しきい値を調整
+    const forwardThreshold = 0.2; // 前傾きのしきい値
     const maxScale = 1.8; // 高齢者向けにより大きく拡大
     const maxFontSize = 32; // フォントサイズも大幅に拡大
+    const upwardOffset = -20; // 拡大時に上に移動するピクセル数
 
     // 既存のタイマーをクリア
     if (animationTimeoutRef.current) {
@@ -89,29 +93,46 @@ const FlickKey: React.FC<FlickKeyProps> = ({ keyData, onCharacterInput, tiltScal
     }
 
     if (position === 'left' && tiltScale < -threshold) {
-      // 左に傾いた時、左側のボタンを拡大
+      // 左に傾いた時、左側のボタンを拡大し上に移動
       scale.value = withTiming(maxScale, animationConfig);
       fontSize.value = withTiming(maxFontSize, animationConfig);
+      translateY.value = withTiming(upwardOffset, animationConfig);
       
       // 2秒後に元に戻す
       animationTimeoutRef.current = setTimeout(() => {
         scale.value = withTiming(1, resetAnimationConfig);
         fontSize.value = withTiming(18, resetAnimationConfig);
+        translateY.value = withTiming(0, resetAnimationConfig);
       }, 2000);
     } else if (position === 'right' && tiltScale > threshold) {
-      // 右に傾いた時、右側のボタンを拡大
+      // 右に傾いた時、右側のボタンを拡大し上に移動
       scale.value = withTiming(maxScale, animationConfig);
       fontSize.value = withTiming(maxFontSize, animationConfig);
+      translateY.value = withTiming(upwardOffset, animationConfig);
       
       // 2秒後に元に戻す
       animationTimeoutRef.current = setTimeout(() => {
         scale.value = withTiming(1, resetAnimationConfig);
         fontSize.value = withTiming(18, resetAnimationConfig);
+        translateY.value = withTiming(0, resetAnimationConfig);
       }, 2000);
-    } else if (Math.abs(tiltScale) <= threshold) {
+    } else if (position === 'center' && forwardTilt > forwardThreshold) {
+      // 前に傾いた時、中央のボタンを拡大し上に移動
+      scale.value = withTiming(maxScale, animationConfig);
+      fontSize.value = withTiming(maxFontSize, animationConfig);
+      translateY.value = withTiming(upwardOffset, animationConfig);
+      
+      // 2秒後に元に戻す
+      animationTimeoutRef.current = setTimeout(() => {
+        scale.value = withTiming(1, resetAnimationConfig);
+        fontSize.value = withTiming(18, resetAnimationConfig);
+        translateY.value = withTiming(0, resetAnimationConfig);
+      }, 2000);
+    } else if (Math.abs(tiltScale) <= threshold && Math.abs(forwardTilt) <= forwardThreshold) {
       // しきい値以下の場合は即座に元に戻す
       scale.value = withTiming(1, resetAnimationConfig);
       fontSize.value = withTiming(18, resetAnimationConfig);
+      translateY.value = withTiming(0, resetAnimationConfig);
     }
 
     // クリーンアップ関数
@@ -120,11 +141,14 @@ const FlickKey: React.FC<FlickKeyProps> = ({ keyData, onCharacterInput, tiltScal
         clearTimeout(animationTimeoutRef.current);
       }
     };
-  }, [tiltScale, position]);
+  }, [tiltScale, forwardTilt, position]);
 
   const animatedStyle = useAnimatedStyle(() => {
     return {
-      transform: [{ scale: scale.value }],
+      transform: [
+        { scale: scale.value },
+        { translateY: translateY.value }
+      ],
     };
   });
 
@@ -240,6 +264,7 @@ const SpecialKey: React.FC<SpecialKeyProps> = ({ icon, text, onPress, style }) =
 export default function JapaneseKeyboard() {
   const [inputText, setInputText] = useState('');
   const [tiltScale, setTiltScale] = useState(0);
+  const [forwardTilt, setForwardTilt] = useState(0); // 前後の傾きを追加
   const [permissionGranted, setPermissionGranted] = useState(false);
   const [sensorSupported, setSensorSupported] = useState(false);
   const [showDebug, setShowDebug] = useState(true);
@@ -396,9 +421,15 @@ export default function JapaneseKeyboard() {
             });
 
             if (x !== null && x !== undefined) {
-              // Normalize tilt value between -1 and 1
+              // Normalize tilt value between -1 and 1 (left/right)
               const normalizedTilt = Math.max(-1, Math.min(1, x / 5));
               setTiltScale(normalizedTilt);
+            }
+
+            if (y !== null && y !== undefined) {
+              // Normalize forward/backward tilt value between -1 and 1
+              const normalizedForwardTilt = Math.max(-1, Math.min(1, y / 5));
+              setForwardTilt(normalizedForwardTilt);
             }
           }
         } catch (error) {
@@ -448,9 +479,13 @@ export default function JapaneseKeyboard() {
           timestamp: Date.now()
         });
 
-        // Normalize tilt value between -1 and 1
+        // Normalize tilt value between -1 and 1 (left/right)
         const normalizedTilt = Math.max(-1, Math.min(1, x / 1));
         setTiltScale(normalizedTilt);
+
+        // Normalize forward/backward tilt value between -1 and 1
+        const normalizedForwardTilt = Math.max(-1, Math.min(1, y / 1));
+        setForwardTilt(normalizedForwardTilt);
       });
 
       cleanup = () => {
@@ -676,10 +711,13 @@ export default function JapaneseKeyboard() {
                 
                 <Text style={styles.debugSectionTitle}>傾き効果 (改良版)</Text>
                 <Text style={styles.debugText}>
-                  正規化値: {tiltScale.toFixed(3)}
+                  左右傾き: {tiltScale.toFixed(3)}
                 </Text>
                 <Text style={styles.debugText}>
-                  しきい値: ±0.15
+                  前後傾き: {forwardTilt.toFixed(3)}
+                </Text>
+                <Text style={styles.debugText}>
+                  しきい値: 左右±0.15, 前後+0.2
                 </Text>
                 <Text style={styles.debugText}>
                   最大拡大率: 1.8倍
@@ -688,10 +726,17 @@ export default function JapaneseKeyboard() {
                   アニメーション: 0.3秒拡大 → 2秒後復帰
                 </Text>
                 <Text style={styles.debugText}>
-                  スケール効果: {Math.abs(tiltScale) > 0.15 ? (tiltScale < 0 ? '左拡大中 (Left)' : '右拡大中 (Right)') : 'なし'}
+                  スケール効果: {
+                    Math.abs(tiltScale) > 0.15 ? 
+                      (tiltScale < 0 ? '左拡大中 (Left)' : '右拡大中 (Right)') :
+                    forwardTilt > 0.2 ? 
+                      '中央拡大中 (Center/Forward)' : 
+                      'なし'
+                  }
                 </Text>
                 <Text style={styles.debugText}>
-                  現在の傾き: {tiltScale > 0 ? '右' : '左'} ({Math.abs(tiltScale).toFixed(3)})
+                  現在の傾き: 左右{tiltScale > 0 ? '右' : '左'} ({Math.abs(tiltScale).toFixed(3)}),
+                  前後{forwardTilt > 0 ? '前' : '後'} ({Math.abs(forwardTilt).toFixed(3)})
                 </Text>
                 
                 <Text style={styles.debugSectionTitle}>回転 (度)</Text>
@@ -782,6 +827,7 @@ export default function JapaneseKeyboard() {
                     keyData={keyData}
                     onCharacterInput={handleCharacterInput}
                     tiltScale={tiltScale}
+                    forwardTilt={forwardTilt}
                     position={keyIndex === 0 ? 'left' : keyIndex === 2 ? 'right' : 'center'}
                   />
                 ))}
@@ -1043,13 +1089,14 @@ const styles = StyleSheet.create({
   },
   keyboard: {
     backgroundColor: '#d1d3d9',
-    paddingTop: 8,
+    paddingTop: 35, // 拡大したボタンのためのスペースを増加
     paddingBottom: Platform.OS === 'ios' ? 34 : 8,
     paddingHorizontal: 4,
   },
   mainKeyboardArea: {
     flexDirection: 'row',
     alignItems: 'flex-start',
+    overflow: 'visible', // 拡大したボタンがクリッピングされないようにする
   },
   leftSideButtons: {
     width: 50,
@@ -1073,6 +1120,7 @@ const styles = StyleSheet.create({
   },
   characterKeys: {
     flex: 1,
+    overflow: 'visible', // 拡大したボタンが見えるようにする
   },
   keyRow: {
     flexDirection: 'row',
@@ -1082,6 +1130,8 @@ const styles = StyleSheet.create({
   keyContainer: {
     flex: 1,
     marginHorizontal: 2,
+    paddingTop: 25, // 拡大したボタンのための上部スペースを追加
+    zIndex: 1, // 拡大時の重なり順序を確保
   },
   key: {
     backgroundColor: 'white',
@@ -1095,10 +1145,12 @@ const styles = StyleSheet.create({
     shadowRadius: 1,
     elevation: 2,
     position: 'relative',
+    zIndex: 2, // 拡大時に他の要素より前面に表示
   },
   keyPressed: {
     backgroundColor: '#e8e8e8',
     shadowOpacity: 0.1,
+    zIndex: 10, // 押下時により前面に表示
   },
   keyText: {
     fontSize: 18,
@@ -1112,6 +1164,7 @@ const styles = StyleSheet.create({
     width: 120,
     height: 120,
     zIndex: 1000,
+    elevation: 1000, // Android向けの重なり順序
   },
   flickChar: {
     position: 'absolute',
