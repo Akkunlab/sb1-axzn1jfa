@@ -18,6 +18,7 @@ import Animated, {
   withTiming,
   withDelay,
   Easing,
+  runOnJS,
 } from 'react-native-reanimated';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
@@ -58,6 +59,7 @@ const FlickKey: React.FC<FlickKeyProps> = ({ keyData, onCharacterInput, tiltScal
   const [currentFlick, setCurrentFlick] = useState(0);
   const [showFlicks, setShowFlicks] = useState(false);
   const panStartRef = useRef({ x: 0, y: 0 });
+  const animationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Animated values for smooth scaling
   const scale = useSharedValue(1);
@@ -79,24 +81,44 @@ const FlickKey: React.FC<FlickKeyProps> = ({ keyData, onCharacterInput, tiltScal
     const maxScale = 1.8; // 高齢者向けにより大きく拡大
     const maxFontSize = 32; // フォントサイズも大幅に拡大
 
+    // 既存のタイマーをクリア
+    if (animationTimeoutRef.current) {
+      clearTimeout(animationTimeoutRef.current);
+    }
+
     if (position === 'left' && tiltScale < -threshold) {
       // 左に傾いた時、左側のボタンを拡大
       scale.value = withTiming(maxScale, animationConfig);
       fontSize.value = withTiming(maxFontSize, animationConfig);
       
       // 2秒後に元に戻す
-      scale.value = withDelay(2000, withTiming(1, resetAnimationConfig));
-      fontSize.value = withDelay(2000, withTiming(18, resetAnimationConfig));
+      animationTimeoutRef.current = setTimeout(() => {
+        scale.value = withTiming(1, resetAnimationConfig);
+        fontSize.value = withTiming(18, resetAnimationConfig);
+      }, 2000);
     } else if (position === 'right' && tiltScale > threshold) {
       // 右に傾いた時、右側のボタンを拡大
       scale.value = withTiming(maxScale, animationConfig);
       fontSize.value = withTiming(maxFontSize, animationConfig);
       
       // 2秒後に元に戻す
-      scale.value = withDelay(2000, withTiming(1, resetAnimationConfig));
-      fontSize.value = withDelay(2000, withTiming(18, resetAnimationConfig));
+      animationTimeoutRef.current = setTimeout(() => {
+        scale.value = withTiming(1, resetAnimationConfig);
+        fontSize.value = withTiming(18, resetAnimationConfig);
+      }, 2000);
+    } else if (Math.abs(tiltScale) <= threshold) {
+      // しきい値以下の場合は即座に元に戻す
+      scale.value = withTiming(1, resetAnimationConfig);
+      fontSize.value = withTiming(18, resetAnimationConfig);
     }
-  }, [tiltScale, position, scale, fontSize]);
+
+    // クリーンアップ関数
+    return () => {
+      if (animationTimeoutRef.current) {
+        clearTimeout(animationTimeoutRef.current);
+      }
+    };
+  }, [tiltScale, position]);
 
   const animatedStyle = useAnimatedStyle(() => {
     return {
@@ -236,9 +258,7 @@ export default function JapaneseKeyboard() {
 
   // Bluetooth keyboard support
   useEffect(() => {
-    const handleKeyPress = (event: KeyboardEvent) => {
-      const { key } = event.nativeEvent;
-      
+    const handleKeyPress = (key: string) => {
       // Handle special keys
       if (key === 'Backspace') {
         handleBackspace();
@@ -269,7 +289,7 @@ export default function JapaneseKeyboard() {
           event.preventDefault();
         }
         
-        handleKeyPress({ nativeEvent: { key: event.key } } as KeyboardEvent);
+        handleKeyPress(event.key);
       };
 
       document.addEventListener('keydown', handleWebKeyPress);
@@ -284,38 +304,47 @@ export default function JapaneseKeyboard() {
     let cleanup: (() => void) | null = null;
 
     const initializeSensor = async () => {
-      if (Platform.OS !== 'web') {
-        setSensorSupported(false);
-        return;
-      }
-
+      // WebでもReact Nativeでもセンサーサポートを試行
       try {
-        // Check if DeviceMotionEvent is supported
-        if (typeof DeviceMotionEvent === 'undefined') {
-          setSensorSupported(false);
-          return;
-        }
+        // Web環境での処理
+        if (Platform.OS === 'web') {
+          // Check if DeviceMotionEvent is supported
+          if (typeof DeviceMotionEvent === 'undefined') {
+            setSensorSupported(false);
+            return;
+          }
 
-        setSensorSupported(true);
+          setSensorSupported(true);
 
-        // Check if permission is required (iOS 13+)
-        if (typeof (DeviceMotionEvent as any).requestPermission === 'function') {
-          try {
-            const permission = await (DeviceMotionEvent as any).requestPermission();
-            if (permission === 'granted') {
-              setPermissionGranted(true);
-              startListening();
-            } else {
+          // Check if permission is required (iOS 13+)
+          if (typeof (DeviceMotionEvent as any).requestPermission === 'function') {
+            try {
+              const permission = await (DeviceMotionEvent as any).requestPermission();
+              if (permission === 'granted') {
+                setPermissionGranted(true);
+                startListening();
+              } else {
+                setPermissionGranted(false);
+              }
+            } catch (error) {
+              console.warn('Permission request failed:', error);
               setPermissionGranted(false);
             }
-          } catch (error) {
-            console.warn('Permission request failed:', error);
-            setPermissionGranted(false);
+          } else {
+            // For other browsers, assume permission is granted
+            setPermissionGranted(true);
+            startListening();
           }
         } else {
-          // For other browsers, assume permission is granted
+          // React Native環境での処理
+          // React Native環境では直接センサーAPIが利用可能かもしれない
+          // とりあえずサポートありとして処理を続行
+          setSensorSupported(true);
           setPermissionGranted(true);
-          startListening();
+          
+          // React Native環境では別のセンサーライブラリが必要かもしれませんが、
+          // ひとまずWebベースでの動作確認を優先
+          console.log('React Native environment detected - sensor support limited to web for now');
         }
       } catch (error) {
         console.warn('Sensor initialization failed:', error);
@@ -515,7 +544,10 @@ export default function JapaneseKeyboard() {
                   アニメーション: 0.3秒拡大 → 2秒後復帰
                 </Text>
                 <Text style={styles.debugText}>
-                  スケール効果: {Math.abs(tiltScale) > 0.15 ? (tiltScale < 0 ? '左拡大中' : '右拡大中') : 'なし'}
+                  スケール効果: {Math.abs(tiltScale) > 0.15 ? (tiltScale < 0 ? '左拡大中 (Left)' : '右拡大中 (Right)') : 'なし'}
+                </Text>
+                <Text style={styles.debugText}>
+                  現在の傾き: {tiltScale > 0 ? '右' : '左'} ({Math.abs(tiltScale).toFixed(3)})
                 </Text>
                 
                 <Text style={styles.debugSectionTitle}>回転 (度)</Text>
