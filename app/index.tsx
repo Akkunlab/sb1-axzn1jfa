@@ -83,9 +83,9 @@ const FlickKey: React.FC<FlickKeyProps> = ({ keyData, onCharacterInput, tiltScal
   useEffect(() => {
     const threshold = 0.15; // しきい値を調整
     const forwardThreshold = 0.2; // 前傾きのしきい値
-    const maxScale = 1.8; // 高齢者向けにより大きく拡大
-    const maxFontSize = 32; // フォントサイズも大幅に拡大
-    const upwardOffset = -40; // 拡大時により大きく上に移動するピクセル数
+    const maxScale = 1.3; // 拡大率を小さくして重なりを防ぐ
+    const maxFontSize = 24; // フォントサイズも控えめに
+    const upwardOffset = -60; // より大きく上に移動して重なりを完全に防ぐ
 
     // 既存のタイマーをクリア
     if (animationTimeoutRef.current) {
@@ -710,7 +710,7 @@ export default function JapaneseKeyboard() {
                   Z: {accelerationData.z.toFixed(3)}
                 </Text>
                 
-                <Text style={styles.debugSectionTitle}>傾き効果 (改良版)</Text>
+                <Text style={styles.debugSectionTitle}>傾き効果 (重なり防止版)</Text>
                 <Text style={styles.debugText}>
                   左右傾き: {tiltScale.toFixed(3)}
                 </Text>
@@ -721,7 +721,10 @@ export default function JapaneseKeyboard() {
                   しきい値: 左右±0.15, 前後+0.2
                 </Text>
                 <Text style={styles.debugText}>
-                  最大拡大率: 1.8倍
+                  最大拡大率: 1.3倍 (重なり防止)
+                </Text>
+                <Text style={styles.debugText}>
+                  上移動距離: 60px (重なり完全防止)
                 </Text>
                 <Text style={styles.debugText}>
                   アニメーション: 0.3秒拡大 → 2秒後復帰
@@ -1090,7 +1093,7 @@ const styles = StyleSheet.create({
   },
   keyboard: {
     backgroundColor: '#d1d3d9',
-    paddingTop: 8, // デフォルト値に戻す
+    paddingTop: 70, // 拡大ボタンのための十分な上部スペースを確保
     paddingBottom: Platform.OS === 'ios' ? 34 : 8,
     paddingHorizontal: 4,
   },
