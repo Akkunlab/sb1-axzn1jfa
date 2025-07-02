@@ -55,9 +55,10 @@ interface FlickKeyProps {
   tiltScale: number;
   forwardTilt: number; // 前後の傾きを追加
   position: 'left' | 'center' | 'right';
+  rowIndex: number; // 行インデックスを追加（0が一番上、3が一番下）
 }
 
-const FlickKey: React.FC<FlickKeyProps> = ({ keyData, onCharacterInput, tiltScale, forwardTilt, position }) => {
+const FlickKey: React.FC<FlickKeyProps> = ({ keyData, onCharacterInput, tiltScale, forwardTilt, position, rowIndex }) => {
   const [isPressed, setIsPressed] = useState(false);
   const [currentFlick, setCurrentFlick] = useState(0);
   const [showFlicks, setShowFlicks] = useState(false);
@@ -86,7 +87,15 @@ const FlickKey: React.FC<FlickKeyProps> = ({ keyData, onCharacterInput, tiltScal
     const forwardThreshold = 0.2; // 前傾きのしきい値
     const maxScale = 1.3; // 拡大率を小さくして重なりを防ぐ
     const maxFontSize = 24; // フォントサイズも控えめに
-    const upwardOffset = -60; // より大きく上に移動して重なりを完全に防ぐ
+    
+    // 行ごとに異なる上移動距離を設定（下の行ほど移動距離が小さく）
+    const upwardOffsets = [
+      -60, // 0行目（一番上）: 最大移動
+      -40, // 1行目: 中程度移動
+      -20, // 2行目: 小移動
+      0    // 3行目（一番下）: 移動なし
+    ];
+    const upwardOffset = upwardOffsets[rowIndex] || 0;
 
     // 既存のタイマーをクリア
     if (animationTimeoutRef.current) {
@@ -127,7 +136,7 @@ const FlickKey: React.FC<FlickKeyProps> = ({ keyData, onCharacterInput, tiltScal
         clearTimeout(animationTimeoutRef.current);
       }
     };
-  }, [tiltScale, forwardTilt, position, isScaled]);
+  }, [tiltScale, forwardTilt, position, rowIndex, isScaled]);
 
   const animatedStyle = useAnimatedStyle(() => {
     return {
@@ -696,7 +705,7 @@ export default function JapaneseKeyboard() {
                   Z: {accelerationData.z.toFixed(3)}
                 </Text>
                 
-                <Text style={styles.debugSectionTitle}>傾き効果 (重なり防止版)</Text>
+                <Text style={styles.debugSectionTitle}>傾き効果 (階段状移動版)</Text>
                 <Text style={styles.debugText}>
                   左右傾き: {tiltScale.toFixed(3)}
                 </Text>
@@ -710,7 +719,7 @@ export default function JapaneseKeyboard() {
                   最大拡大率: 1.3倍 (重なり防止)
                 </Text>
                 <Text style={styles.debugText}>
-                  上移動距離: 60px (重なり完全防止)
+                  移動距離: 上60px→中40px→小20px→下0px
                 </Text>
                 <Text style={styles.debugText}>
                   アニメーション: 0.3秒拡大 → 2秒後復帰
@@ -822,6 +831,7 @@ export default function JapaneseKeyboard() {
                     tiltScale={tiltScale}
                     forwardTilt={forwardTilt}
                     position={keyIndex === 0 ? 'left' : keyIndex === 2 ? 'right' : 'center'}
+                    rowIndex={rowIndex}
                   />
                 ))}
               </View>
@@ -1082,7 +1092,7 @@ const styles = StyleSheet.create({
   },
   keyboard: {
     backgroundColor: '#d1d3d9',
-    paddingTop: 70, // 拡大ボタンのための十分な上部スペースを確保
+    paddingTop: 35, // 一番下の行は移動しないため、上部余白を控えめに
     paddingBottom: Platform.OS === 'ios' ? 34 : 8,
     paddingHorizontal: 4,
   },
