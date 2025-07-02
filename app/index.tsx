@@ -10,6 +10,7 @@ import {
   SafeAreaView,
   PanResponder,
   KeyboardEvent,
+  Alert,
 } from 'react-native';
 import { RotateCcw, ArrowRight, Globe, Mic, X } from 'lucide-react-native';
 import Animated, {
@@ -20,6 +21,7 @@ import Animated, {
   Easing,
   runOnJS,
 } from 'react-native-reanimated';
+import { Accelerometer, Gyroscope } from 'expo-sensors';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -304,47 +306,13 @@ export default function JapaneseKeyboard() {
     let cleanup: (() => void) | null = null;
 
     const initializeSensor = async () => {
-      // WebでもReact Nativeでもセンサーサポートを試行
       try {
-        // Web環境での処理
         if (Platform.OS === 'web') {
-          // Check if DeviceMotionEvent is supported
-          if (typeof DeviceMotionEvent === 'undefined') {
-            setSensorSupported(false);
-            return;
-          }
-
-          setSensorSupported(true);
-
-          // Check if permission is required (iOS 13+)
-          if (typeof (DeviceMotionEvent as any).requestPermission === 'function') {
-            try {
-              const permission = await (DeviceMotionEvent as any).requestPermission();
-              if (permission === 'granted') {
-                setPermissionGranted(true);
-                startListening();
-              } else {
-                setPermissionGranted(false);
-              }
-            } catch (error) {
-              console.warn('Permission request failed:', error);
-              setPermissionGranted(false);
-            }
-          } else {
-            // For other browsers, assume permission is granted
-            setPermissionGranted(true);
-            startListening();
-          }
+          // Web環境での処理
+          await initializeWebSensors();
         } else {
-          // React Native環境での処理
-          // React Native環境では直接センサーAPIが利用可能かもしれない
-          // とりあえずサポートありとして処理を続行
-          setSensorSupported(true);
-          setPermissionGranted(true);
-          
-          // React Native環境では別のセンサーライブラリが必要かもしれませんが、
-          // ひとまずWebベースでの動作確認を優先
-          console.log('React Native environment detected - sensor support limited to web for now');
+          // React Native環境での処理（expo-sensorsを使用）
+          await initializeNativeSensors();
         }
       } catch (error) {
         console.warn('Sensor initialization failed:', error);
@@ -352,7 +320,68 @@ export default function JapaneseKeyboard() {
       }
     };
 
-    const startListening = () => {
+    const initializeWebSensors = async () => {
+      // Check if DeviceMotionEvent is supported
+      if (typeof DeviceMotionEvent === 'undefined') {
+        setSensorSupported(false);
+        return;
+      }
+
+      setSensorSupported(true);
+
+      // Check if permission is required (iOS 13+)
+      if (typeof (DeviceMotionEvent as any).requestPermission === 'function') {
+        try {
+          const permission = await (DeviceMotionEvent as any).requestPermission();
+          if (permission === 'granted') {
+            setPermissionGranted(true);
+            startWebListening();
+          } else {
+            setPermissionGranted(false);
+            // アラートでユーザーに許可を促す
+            Alert.alert(
+              'センサー権限が必要です',
+              'キーボードの傾き機能を使用するには、デバイスモーションセンサーの許可が必要です。',
+              [
+                { text: 'キャンセル', style: 'cancel' },
+                { text: '許可', onPress: handleRequestPermission }
+              ]
+            );
+          }
+        } catch (error) {
+          console.warn('Permission request failed:', error);
+          setPermissionGranted(false);
+          Alert.alert(
+            'センサー権限エラー',
+            'センサーの許可を取得できませんでした。設定から手動で許可してください。',
+            [{ text: 'OK' }]
+          );
+        }
+      } else {
+        // For other browsers, assume permission is granted
+        setPermissionGranted(true);
+        startWebListening();
+      }
+    };
+
+    const initializeNativeSensors = async () => {
+      // expo-sensorsの可用性をチェック
+      const isAvailable = await Accelerometer.isAvailableAsync();
+      if (isAvailable) {
+        setSensorSupported(true);
+        setPermissionGranted(true);
+        startNativeListening();
+      } else {
+        setSensorSupported(false);
+        Alert.alert(
+          'センサー非対応',
+          'このデバイスはモーションセンサーに対応していません。',
+          [{ text: 'OK' }]
+        );
+      }
+    };
+
+    const startWebListening = () => {
       const handleDeviceMotion = (event: DeviceMotionEvent) => {
         try {
           if (event.accelerationIncludingGravity) {
@@ -407,6 +436,28 @@ export default function JapaneseKeyboard() {
       };
     };
 
+    const startNativeListening = () => {
+      // Accelerometerの更新頻度を設定
+      Accelerometer.setUpdateInterval(100); // 100ms間隔
+
+      const subscription = Accelerometer.addListener(({ x, y, z }) => {
+        setAccelerationData({
+          x: x || 0,
+          y: y || 0,
+          z: z || 0,
+          timestamp: Date.now()
+        });
+
+        // Normalize tilt value between -1 and 1
+        const normalizedTilt = Math.max(-1, Math.min(1, x / 1));
+        setTiltScale(normalizedTilt);
+      });
+
+      cleanup = () => {
+        subscription && subscription.remove();
+      };
+    };
+
     initializeSensor();
 
     return () => {
@@ -424,9 +475,44 @@ export default function JapaneseKeyboard() {
           setPermissionGranted(true);
           // Reload to reinitialize
           window.location.reload();
+        } else {
+          Alert.alert(
+            'センサー権限が拒否されました',
+            'キーボードの傾き機能を使用するには、ブラウザの設定でモーションセンサーの許可を有効にしてください。',
+            [{ text: 'OK' }]
+          );
         }
       } catch (error) {
         console.error('Permission request failed:', error);
+        Alert.alert(
+          'エラー',
+          'センサー権限の要求中にエラーが発生しました。ブラウザを再読み込みして再試行してください。',
+          [{ text: 'OK' }]
+        );
+      }
+    } else if (Platform.OS !== 'web') {
+      // React Native環境での権限要求
+      try {
+        const isAvailable = await Accelerometer.isAvailableAsync();
+        if (isAvailable) {
+          setPermissionGranted(true);
+          setSensorSupported(true);
+          // センサーリスナーを開始
+          window.location.reload();
+        } else {
+          Alert.alert(
+            'センサー非対応',
+            'このデバイスはモーションセンサーに対応していません。',
+            [{ text: 'OK' }]
+          );
+        }
+      } catch (error) {
+        console.error('Native sensor check failed:', error);
+        Alert.alert(
+          'エラー',
+          'センサーの確認中にエラーが発生しました。',
+          [{ text: 'OK' }]
+        );
       }
     }
   };
@@ -471,8 +557,44 @@ export default function JapaneseKeyboard() {
     setShowDebug(!showDebug);
   };
 
+  // Component for sensor permission request
+  const SensorPermissionModal = () => {
+    if (sensorSupported && !permissionGranted) {
+      return (
+        <View style={styles.permissionModal}>
+          <View style={styles.permissionModalContent}>
+            <Text style={styles.permissionModalTitle}>センサー権限が必要です</Text>
+            <Text style={styles.permissionModalText}>
+              キーボードの傾き機能を使用するには、デバイスのモーションセンサーへのアクセス許可が必要です。
+            </Text>
+            {Platform.OS === 'web' && (
+              <Text style={styles.permissionModalSubtext}>
+                iOS: 設定 → Safari → モーションと方向のアクセス を有効にしてください
+              </Text>
+            )}
+            <View style={styles.permissionModalButtons}>
+              <TouchableWithoutFeedback onPress={() => setPermissionGranted(false)}>
+                <View style={styles.permissionModalSkipButton}>
+                  <Text style={styles.permissionModalSkipText}>スキップ</Text>
+                </View>
+              </TouchableWithoutFeedback>
+              <TouchableWithoutFeedback onPress={handleRequestPermission}>
+                <View style={styles.permissionModalAllowButton}>
+                  <Text style={styles.permissionModalAllowText}>許可する</Text>
+                </View>
+              </TouchableWithoutFeedback>
+            </View>
+          </View>
+        </View>
+      );
+    }
+    return null;
+  };
+
   return (
     <SafeAreaView style={styles.container}>
+      <SensorPermissionModal />
+      
       {/* Header */}
       <View style={styles.header}>
         <TouchableWithoutFeedback>
@@ -514,10 +636,32 @@ export default function JapaneseKeyboard() {
               サポート: {sensorSupported ? '✓' : '✗'} | 権限: {permissionGranted ? '✓' : '✗'}
             </Text>
             
+            {!sensorSupported && (
+              <Text style={styles.errorText}>
+                ⚠️ このデバイス/ブラウザはモーションセンサーに対応していません
+              </Text>
+            )}
+            
+            {sensorSupported && !permissionGranted && (
+              <View style={styles.permissionSection}>
+                <Text style={styles.warningText}>
+                  ⚠️ センサー権限が必要です
+                </Text>
+                <TouchableWithoutFeedback onPress={handleRequestPermission}>
+                  <View style={styles.permissionButton}>
+                    <Text style={styles.permissionButtonText}>センサー権限を許可</Text>
+                  </View>
+                </TouchableWithoutFeedback>
+                <Text style={styles.instructionText}>
+                  iOSの場合: 設定 → Safari → モーションと方向のアクセス を有効にしてください
+                </Text>
+              </View>
+            )}
+            
             <Text style={styles.debugSectionTitle}>Bluetoothキーボード</Text>
             <Text style={styles.debugText}>対応済み ✓</Text>
             
-            {sensorSupported && (
+            {sensorSupported && permissionGranted && (
               <>
                 <Text style={styles.debugSectionTitle}>加速度 (m/s²)</Text>
                 <Text style={styles.debugText}>
@@ -561,14 +705,6 @@ export default function JapaneseKeyboard() {
                   γ: {rotationData.gamma.toFixed(1)}°
                 </Text>
               </>
-            )}
-            
-            {!permissionGranted && sensorSupported && (
-              <TouchableWithoutFeedback onPress={handleRequestPermission}>
-                <View style={styles.permissionButton}>
-                  <Text style={styles.permissionButtonText}>センサー権限を許可</Text>
-                </View>
-              </TouchableWithoutFeedback>
             )}
           </View>
         )}
@@ -688,6 +824,9 @@ export default function JapaneseKeyboard() {
           </TouchableWithoutFeedback>
         </View>
       </View>
+
+      {/* Sensor Permission Modal */}
+      <SensorPermissionModal />
     </SafeAreaView>
   );
 }
@@ -764,6 +903,94 @@ const styles = StyleSheet.create({
   permissionButtonText: {
     color: 'white',
     fontSize: 12,
+    fontWeight: 'bold',
+  },
+  permissionSection: {
+    marginTop: 8,
+    padding: 8,
+    backgroundColor: 'rgba(255, 193, 7, 0.2)',
+    borderRadius: 4,
+  },
+  errorText: {
+    color: '#ff4444',
+    fontSize: 11,
+    marginBottom: 4,
+    fontWeight: 'bold',
+  },
+  warningText: {
+    color: '#ff9800',
+    fontSize: 11,
+    marginBottom: 4,
+    fontWeight: 'bold',
+  },
+  instructionText: {
+    color: '#ccc',
+    fontSize: 10,
+    marginTop: 4,
+    fontStyle: 'italic',
+  },
+  permissionModal: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  permissionModalContent: {
+    backgroundColor: 'white',
+    margin: 20,
+    padding: 20,
+    borderRadius: 10,
+    maxWidth: 300,
+  },
+  permissionModalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+  permissionModalText: {
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+  permissionModalSubtext: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 15,
+    textAlign: 'center',
+    fontStyle: 'italic',
+  },
+  permissionModalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  permissionModalSkipButton: {
+    backgroundColor: '#ccc',
+    padding: 10,
+    borderRadius: 5,
+    flex: 1,
+    marginRight: 10,
+    alignItems: 'center',
+  },
+  permissionModalSkipText: {
+    color: '#333',
+    fontWeight: '500',
+  },
+  permissionModalAllowButton: {
+    backgroundColor: '#007AFF',
+    padding: 10,
+    borderRadius: 5,
+    flex: 1,
+    alignItems: 'center',
+  },
+  permissionModalAllowText: {
+    color: 'white',
     fontWeight: 'bold',
   },
   toolbar: {
