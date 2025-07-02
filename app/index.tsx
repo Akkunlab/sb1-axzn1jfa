@@ -61,6 +61,7 @@ const FlickKey: React.FC<FlickKeyProps> = ({ keyData, onCharacterInput, tiltScal
   const [isPressed, setIsPressed] = useState(false);
   const [currentFlick, setCurrentFlick] = useState(0);
   const [showFlicks, setShowFlicks] = useState(false);
+  const [isScaled, setIsScaled] = useState(false); // 現在拡大されているかどうかの状態
   const panStartRef = useRef({ x: 0, y: 0 });
   const animationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -92,44 +93,29 @@ const FlickKey: React.FC<FlickKeyProps> = ({ keyData, onCharacterInput, tiltScal
       clearTimeout(animationTimeoutRef.current);
     }
 
-    if (position === 'left' && tiltScale < -threshold) {
-      // 左に傾いた時、左側のボタンを拡大し上に移動
+    // 現在のボタンが拡大対象かどうかを判定
+    const shouldScale = 
+      (position === 'left' && tiltScale < -threshold) ||
+      (position === 'right' && tiltScale > threshold) ||
+      (position === 'center' && forwardTilt > forwardThreshold);
+
+    if (shouldScale && !isScaled) {
+      // 拡大開始
+      setIsScaled(true);
       scale.value = withTiming(maxScale, animationConfig);
       fontSize.value = withTiming(maxFontSize, animationConfig);
       translateY.value = withTiming(upwardOffset, animationConfig);
       
       // 2秒後に元に戻す
       animationTimeoutRef.current = setTimeout(() => {
+        setIsScaled(false);
         scale.value = withTiming(1, resetAnimationConfig);
         fontSize.value = withTiming(18, resetAnimationConfig);
         translateY.value = withTiming(0, resetAnimationConfig);
       }, 2000);
-    } else if (position === 'right' && tiltScale > threshold) {
-      // 右に傾いた時、右側のボタンを拡大し上に移動
-      scale.value = withTiming(maxScale, animationConfig);
-      fontSize.value = withTiming(maxFontSize, animationConfig);
-      translateY.value = withTiming(upwardOffset, animationConfig);
-      
-      // 2秒後に元に戻す
-      animationTimeoutRef.current = setTimeout(() => {
-        scale.value = withTiming(1, resetAnimationConfig);
-        fontSize.value = withTiming(18, resetAnimationConfig);
-        translateY.value = withTiming(0, resetAnimationConfig);
-      }, 2000);
-    } else if (position === 'center' && forwardTilt > forwardThreshold) {
-      // 前に傾いた時、中央のボタンを拡大し上に移動
-      scale.value = withTiming(maxScale, animationConfig);
-      fontSize.value = withTiming(maxFontSize, animationConfig);
-      translateY.value = withTiming(upwardOffset, animationConfig);
-      
-      // 2秒後に元に戻す
-      animationTimeoutRef.current = setTimeout(() => {
-        scale.value = withTiming(1, resetAnimationConfig);
-        fontSize.value = withTiming(18, resetAnimationConfig);
-        translateY.value = withTiming(0, resetAnimationConfig);
-      }, 2000);
-    } else if (Math.abs(tiltScale) <= threshold && Math.abs(forwardTilt) <= forwardThreshold) {
-      // しきい値以下の場合は即座に元に戻す
+    } else if (!shouldScale && isScaled) {
+      // 他のボタンが拡大されたか、しきい値以下になった場合は即座に元に戻す
+      setIsScaled(false);
       scale.value = withTiming(1, resetAnimationConfig);
       fontSize.value = withTiming(18, resetAnimationConfig);
       translateY.value = withTiming(0, resetAnimationConfig);
@@ -141,7 +127,7 @@ const FlickKey: React.FC<FlickKeyProps> = ({ keyData, onCharacterInput, tiltScal
         clearTimeout(animationTimeoutRef.current);
       }
     };
-  }, [tiltScale, forwardTilt, position]);
+  }, [tiltScale, forwardTilt, position, isScaled]);
 
   const animatedStyle = useAnimatedStyle(() => {
     return {
@@ -737,6 +723,9 @@ export default function JapaneseKeyboard() {
                       '中央拡大中 (Center/Forward)' : 
                       'なし'
                   }
+                </Text>
+                <Text style={styles.debugText}>
+                  拡大制御: 一度に一つのボタンのみ拡大
                 </Text>
                 <Text style={styles.debugText}>
                   現在の傾き: 左右{tiltScale > 0 ? '右' : '左'} ({Math.abs(tiltScale).toFixed(3)}),
