@@ -85,7 +85,7 @@ const FlickKey: React.FC<FlickKeyProps> = ({ keyData, onCharacterInput, tiltScal
     const forwardThreshold = 0.2; // 前傾きのしきい値
     const maxScale = 1.8; // 高齢者向けにより大きく拡大
     const maxFontSize = 32; // フォントサイズも大幅に拡大
-    const upwardOffset = -20; // 拡大時に上に移動するピクセル数
+    const upwardOffset = -40; // 拡大時により大きく上に移動するピクセル数
 
     // 既存のタイマーをクリア
     if (animationTimeoutRef.current) {
@@ -149,6 +149,7 @@ const FlickKey: React.FC<FlickKeyProps> = ({ keyData, onCharacterInput, tiltScal
         { scale: scale.value },
         { translateY: translateY.value }
       ],
+      zIndex: scale.value > 1 ? 100 : 2, // 拡大中は最前面に表示
     };
   });
 
@@ -1089,7 +1090,7 @@ const styles = StyleSheet.create({
   },
   keyboard: {
     backgroundColor: '#d1d3d9',
-    paddingTop: 35, // 拡大したボタンのためのスペースを増加
+    paddingTop: 8, // デフォルト値に戻す
     paddingBottom: Platform.OS === 'ios' ? 34 : 8,
     paddingHorizontal: 4,
   },
@@ -1130,7 +1131,7 @@ const styles = StyleSheet.create({
   keyContainer: {
     flex: 1,
     marginHorizontal: 2,
-    paddingTop: 25, // 拡大したボタンのための上部スペースを追加
+    // paddingTopを削除してデフォルト状態では余分なスペースを作らない
     zIndex: 1, // 拡大時の重なり順序を確保
   },
   key: {
